@@ -3,24 +3,44 @@ import argparse
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any, List
 
 LOG_FILE = Path("devlog_entries.json")
 SUMMARY_FILE = Path("DEVLOG_SUMMARY.md")
 
 
-def load_entries(path: Path) -> list:
-    if not path.exists():
-        return []
-    with path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
+class DevlogError(Exception):
+    """Raised when a devlog file cannot be read, written, or validated."""
+
+
+def load_json(path: Path, default: Any) -> Any:
+    """Load JSON from path, returning default only when the file is missing."""
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return default
+    except json.JSONDecodeError as error:
+        raise DevlogError(f"Invalid JSON in {path}: {error.msg}.") from error
+    except (OSError, UnicodeError) as error:
+        raise DevlogError(f"Could not read {path}: {error}") from error
+
+
+def load_entries(path: Path) -> List[dict]:
+    data = load_json(path, [])
     if not isinstance(data, list):
-        raise ValueError("Log file must contain a JSON list of entries.")
+        raise DevlogError(f"Log file {path} must contain a JSON list of entries.")
+    if not all(isinstance(entry, dict) for entry in data):
+        raise DevlogError(f"Log file {path} must contain only JSON objects.")
     return data
 
 
-def save_entries(path: Path, entries: list) -> None:
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(entries, file, indent=2)
+def save_entries(path: Path, entries: List[dict]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
+    except (OSError, TypeError, ValueError) as error:
+        raise DevlogError(f"Could not write {path}: {error}") from error
 
 
 def add_entry(title: str, category: str, notes: str, log_path: Path) -> None:
@@ -66,12 +86,22 @@ def export_summary(log_path: Path, summary_path: Path) -> None:
                 ]
             )
 
-    summary_path.write_text("\n".join(lines), encoding="utf-8")
+    try:
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text("\n".join(lines), encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise DevlogError(f"Could not write {summary_path}: {error}") from error
     print(f"Exported Markdown summary to {summary_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Developer daily devlog CLI")
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=LOG_FILE,
+        help="JSON file used to store entries (default: devlog_entries.json)",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_parser = subparsers.add_parser("add", help="Add a devlog entry")
@@ -80,7 +110,15 @@ def build_parser() -> argparse.ArgumentParser:
     add_parser.add_argument("--notes", required=True, help="Entry notes")
 
     subparsers.add_parser("view", help="View all devlog entries")
-    subparsers.add_parser("export", help="Export entries to Markdown summary")
+    export_parser = subparsers.add_parser(
+        "export", help="Export entries to Markdown summary"
+    )
+    export_parser.add_argument(
+        "--output",
+        type=Path,
+        default=SUMMARY_FILE,
+        help="Markdown output file (default: DEVLOG_SUMMARY.md)",
+    )
 
     return parser
 
@@ -90,12 +128,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "add":
-        add_entry(args.title, args.category, args.notes, LOG_FILE)
+        add_entry(args.title, args.category, args.notes, args.log_file)
     elif args.command == "view":
-        view_entries(LOG_FILE)
+        view_entries(args.log_file)
     elif args.command == "export":
-        export_summary(LOG_FILE, SUMMARY_FILE)
+        export_summary(args.log_file, args.output)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except DevlogError as error:
+        raise SystemExit(f"Error: {error}") from error

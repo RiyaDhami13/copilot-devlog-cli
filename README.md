@@ -14,6 +14,10 @@ From the repository root, run:
 python devlog.py <command> [options]
 ```
 
+Use `--log-file` before the subcommand to store entries in a different JSON
+file. Missing log files start empty; malformed or unreadable files are reported
+as CLI errors instead of being silently replaced.
+
 ### Add a log entry
 
 ```bash
@@ -30,6 +34,12 @@ python devlog.py view
 
 ```bash
 python devlog.py export
+```
+
+To write the Markdown summary somewhere else, use `--output`:
+
+```bash
+python devlog.py export --output reports/devlog.md
 ```
 
 ## Output files
